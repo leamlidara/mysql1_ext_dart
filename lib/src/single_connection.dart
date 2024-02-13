@@ -139,38 +139,24 @@ class MySqlConnection {
     String sql,
     Iterable<List<Object?>> values,
   ) async {
-    PreparedQuery? prepared;
     final ret = <Results>[];
-    try {
-      prepared = await _conn.processHandler<PreparedQuery>(
-        PrepareHandler(sql),
-        _timeout,
-      );
-      _log.fine('Prepared queryMulti query for: $sql');
+    sql = sql.replaceAll(RegExp(r'\?+'), '?');
+    int index = 0;
+    sql = sql.replaceAllMapped(RegExp(r'\?'), (m) => ':dr${index++}');
 
-      for (final v in values) {
-        if (v.length != prepared.parameterCount) {
-          throw MySqlClientError(
-            'Length of parameters (${v.length}) does not match parameter count in query (${prepared.parameterCount})',
-          );
-        }
-        final handler = ExecuteQueryHandler(prepared, false /* executed */, v);
-        ret.add(await _conn.processHandlerWithResults(handler, _timeout));
+    for (final v in values) {
+      Map<String, dynamic> params = {};
+      final int cnt = v.length;
+      for (var i = 0; i < cnt; i++) {
+        params.addAll({"dr$i": v[i]});
       }
-    } finally {
-      if (prepared != null) {
-        await _conn.processHandlerNoResponse(
-          CloseStatementHandler(prepared.statementHandlerId),
-          _timeout,
-        );
-      }
+      ret.add(await execute(sql, params));
     }
+
     return ret;
   }
 
-  /// This method is the same `query`, however this will use parameter name and
-  /// expected to be faster than query since this method did not connect to
-  /// server when prepare parameter.
+  /// This method is the same `query`, however this will use parameter name.
   ///
   /// eg. ```execute('SELECT * FROM sessions WHERE session_id=:sid LIMIT 1', {'sid':'THIS IS SAMPLE SESSION'})```.
   Future<Results> execute(String sql, [Map<String, dynamic>? params]) {
@@ -493,7 +479,6 @@ class ReqRespConnection {
         var results = await _processHandler<ResultsStream>(handler).timeout(timeout);
         // Read all of the results. This is so we can close the handler before returning to the
         // user. Obviously this is not super efficient but it guarantees correct api use.
-        await Future.delayed(const Duration(milliseconds: 1));
         return await Results._read(results).timeout(timeout);
       } finally {
         _handler = null;

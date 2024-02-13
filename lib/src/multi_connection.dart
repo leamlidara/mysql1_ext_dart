@@ -1,5 +1,7 @@
+import 'dart:math';
 import 'package:mysql1_ext/src/connection_settings.dart';
 import 'package:mysql1_ext/src/single_connection.dart';
+import 'package:mysql1_ext/src/mysql_client_error.dart';
 
 class MySqlConnectionPool {
   MySqlConnectionPool._(ConnectionSettings connectionSettings, int maxConnection, bool isUnixSocket) {
@@ -43,6 +45,8 @@ class MySqlConnectionPool {
   /// eg. ```query('SELECT FROM users WHERE id = ?', [userId])```.
   Future<Results> query(String sql, [List<Object?>? values]) async {
     final conn = await _getFreeConnection();
+    if (conn == null) throw MySqlClientError("Operation timeout.");
+
     try {
       final result = await conn.query(sql, values);
       _releaseConnection(conn);
@@ -61,6 +65,8 @@ class MySqlConnectionPool {
     Iterable<List<Object?>> values,
   ) async {
     final conn = await _getFreeConnection();
+    if (conn == null) throw MySqlClientError("Operation timeout.");
+
     try {
       final result = await conn.queryMulti(sql, values);
       _releaseConnection(conn);
@@ -78,6 +84,8 @@ class MySqlConnectionPool {
   /// eg. ```execute('SELECT * FROM sessions WHERE session_id=:sid LIMIT 1', {'sid':'THIS IS SAMPLE SESSION'})```.
   Future<Results> execute(String sql, [Map<String, dynamic>? params]) async {
     final conn = await _getFreeConnection();
+    if (conn == null) throw MySqlClientError("Operation timeout.");
+
     try {
       final result = await conn.execute(sql, params);
       _releaseConnection(conn);
@@ -93,6 +101,8 @@ class MySqlConnectionPool {
     void Function(Object)? onError,
   }) async {
     final conn = await _getFreeConnection();
+    if (conn == null) throw MySqlClientError("Operation timeout.");
+
     try {
       final result = await conn.transaction<T>(queryBlock, onError: onError);
       _releaseConnection(conn);
@@ -103,7 +113,7 @@ class MySqlConnectionPool {
     }
   }
 
-  Future<MySqlConnection> _getFreeConnection() async {
+  Future<MySqlConnection?> _getFreeConnection() async {
     if (_idleConnections.isNotEmpty) {
       final conn = _idleConnections.removeAt(0);
       _activeConnections.add(conn);
@@ -121,13 +131,17 @@ class MySqlConnectionPool {
       );
 
       _activeConnections.add(conn);
-
       return conn;
-    } else {
-      await Future.doWhile(() => idleConnections == 0);
+    }
+
+    var expire = DateTime.now().add(Duration(milliseconds: Random().nextInt(50) + 30));
+    await Future.doWhile(() => (idleConnections == 0 || expire.compareTo(DateTime.now()) == 1));
+    try {
       final conn = _idleConnections.removeAt(0);
       _activeConnections.add(conn);
       return conn;
+    } finally {
+      return null;
     }
   }
 
