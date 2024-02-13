@@ -1,5 +1,5 @@
 name: mysql1_ext
-version: 0.0.1
+version: 0.0.2
 description: A library for connecting to and querying MySQL & MariaDB databases.
 homepage: https://github.com/leamlidara/mysql1_ext_dart
 
