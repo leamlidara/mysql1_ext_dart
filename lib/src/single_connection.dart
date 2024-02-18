@@ -475,6 +475,7 @@ class ReqRespConnection {
         var results = await _processHandler<ResultsStream>(handler).timeout(timeout);
         // Read all of the results. This is so we can close the handler before returning to the
         // user. Obviously this is not super efficient but it guarantees correct api use.
+        await Future<void>.delayed(const Duration(milliseconds: 1));
         return await Results._read(results).timeout(timeout);
       } finally {
         _handler = null;

@@ -1,7 +1,11 @@
 Changelog
 =========
 
-v0.0.1
+v0.0.3
+------
+* Fix unexpected result returned.
+
+v0.0.2
 ------
 * Fix ``Invalid value: Not in inclusive range`` bug
 
