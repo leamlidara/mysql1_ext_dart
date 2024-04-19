@@ -1,6 +1,10 @@
 Changelog
 =========
 
+v0.0.4
+------
+* Trying to optimize speed.
+
 v0.0.3
 ------
 * Fix unexpected result returned.

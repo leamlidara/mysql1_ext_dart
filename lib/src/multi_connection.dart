@@ -114,20 +114,23 @@ class MySqlConnectionPool {
   }
 
   Future<MySqlConnection?> _getFreeConnection() async {
-    if (_idleConnections.isNotEmpty) {
-      final conn = _idleConnections.removeAt(0);
-      _activeConnections.add(conn);
-      return conn;
-    }
+    // ignore: literal_only_boolean_expressions
+    do {
+      if (_idleConnections.isNotEmpty) {
+        final conn = _idleConnections.removeAt(0);
+        if (conn.isClosed) continue;
+
+        _activeConnections.add(conn);
+        return conn;
+      } else {
+        break;
+      }
+    } while (true);
 
     if (allConnections < _maxConnection) {
       final conn = await MySqlConnection.connect(
         _settings,
         isUnixSocket: _isUnixSocket,
-        onClosed: (mConn) {
-          _idleConnections.remove(mConn);
-          _activeConnections.remove(mConn);
-        },
       );
 
       _activeConnections.add(conn);

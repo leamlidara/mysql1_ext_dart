@@ -18,7 +18,6 @@ import 'package:mysql1_ext/src/query/query_stream_handler.dart';
 import 'package:mysql1_ext/src/results/field.dart';
 import 'package:mysql1_ext/src/results/results_impl.dart';
 import 'package:mysql1_ext/src/results/row.dart';
-import 'package:pool/pool.dart';
 
 final Logger _log = Logger('MySqlConnection');
 
@@ -31,6 +30,7 @@ class MySqlConnection {
 
   final ReqRespConnection _conn;
   bool _sentClose = false;
+  bool get isClosed => _conn._socket.closed;
 
   /// Close the connection
   ///
@@ -61,7 +61,6 @@ class MySqlConnection {
   static Future<MySqlConnection> connect(
     ConnectionSettings c, {
     bool isUnixSocket = false,
-    void Function(MySqlConnection)? onClosed,
   }) async {
     assert(!c.useSSL); // Not implemented
     assert(!c.useCompression);
@@ -95,7 +94,6 @@ class MySqlConnection {
       onClosed: () {
         if (conn != null) {
           conn.handleError(const SocketException.closed());
-          onClosed!(_mysqlConn);
         }
       },
     );
@@ -113,8 +111,7 @@ class MySqlConnection {
     conn = ReqRespConnection(socket, handler, handshakeCompleter, c.maxPacketSize);
 
     await handshakeCompleter.future.timeout(c.timeout);
-    _mysqlConn = MySqlConnection(c.timeout, conn);
-    return _mysqlConn;
+    return MySqlConnection(c.timeout, conn);
   }
 
   /// Run [sql] query on the database using [values] as positional sql parameters.
@@ -136,17 +133,17 @@ class MySqlConnection {
     Iterable<List<Object?>> values,
   ) async {
     final ret = <Results>[];
-    sql = sql.replaceAll(RegExp(r'\?+'), '?');
-    int index = 0;
-    sql = sql.replaceAllMapped(RegExp(r'\?'), (m) => ':dr${index++}');
+    var nSql = sql.replaceAll(RegExp(r'\?+'), '?');
+    var index = 0;
+    nSql = nSql.replaceAllMapped(RegExp(r'\?'), (m) => ':dr${index++}');
 
     for (final v in values) {
-      Map<String, dynamic> params = {};
-      final int cnt = v.length;
+      final params = <String, dynamic>{};
+      final cnt = v.length;
       for (var i = 0; i < cnt; i++) {
-        params.addAll({"dr$i": v[i]});
+        params.addAll({'dr$i': v[i]});
       }
-      ret.add(await execute(sql, params));
+      ret.add(await execute(nSql, params));
     }
 
     return ret;
@@ -216,9 +213,10 @@ class Results extends IterableBase<ResultRow> {
   final List<ResultRow> _rows;
 
   static Future<Results> _read(ResultsStream r) async {
-    final rows = await r.toList();
-    return Results._(rows, r.fields, r.insertId, r.affectedRows);
+    return r.toList().then((row) => Results._(row, r.fields, r.insertId, r.affectedRows));
   }
+
+  static Results _empty() => Results._([], [], 0, 0);
 
   @override
   Iterator<ResultRow> get iterator => _rows.iterator;
@@ -453,43 +451,32 @@ class ReqRespConnection {
     return c.future;
   }
 
-  final Pool pool = Pool(1);
-
-  /// The 3 functions below this line are the main interface to the running handlers on the connection.
-  /// Each function MUST queue the handlers in the pool and MUST tidy up the connection (leave _handler null)
-  /// before finishing.
-
-  Future<T> processHandler<T>(Handler handler, Duration timeout) {
-    return pool.withResource(() async {
-      try {
-        return await _processHandler<T>(handler).timeout(timeout);
-      } finally {
-        _handler = null;
-      }
-    });
-  }
+  /// The 2 functions below this line are the main interface to the running handlers on the connection.
+  /// Each function MUST tidy up the connection (leave _handler null) before finishing.
 
   Future<Results> processHandlerWithResults(Handler handler, Duration timeout) {
-    return pool.withResource(() async {
-      try {
-        var results = await _processHandler<ResultsStream>(handler).timeout(timeout);
-        // Read all of the results. This is so we can close the handler before returning to the
-        // user. Obviously this is not super efficient but it guarantees correct api use.
-        await Future<void>.delayed(const Duration(milliseconds: 1));
-        return await Results._read(results).timeout(timeout);
-      } finally {
-        _handler = null;
-      }
+    return _processHandler<ResultsStream>(handler).timeout(timeout).then((results) {
+      return Future.delayed(const Duration(microseconds: 2), () {
+        return Results._read(results).timeout(timeout).then((value) {
+          _handler = null;
+          return value;
+        }).catchError((e) {
+          _handler = null;
+          return Results._empty();
+        });
+      });
+    }).catchError((e) {
+      _handler = null;
+      return Results._empty();
     });
   }
 
   Future<void> processHandlerNoResponse(Handler handler, Duration timeout) {
-    return pool.withResource(() async {
-      try {
-        return await _processHandlerNoResponse(handler).timeout(timeout);
-      } finally {
-        _handler = null;
-      }
+    return _processHandlerNoResponse(handler).timeout(timeout).then((result) {
+      _handler = null;
+      return result;
+    }).catchError((e) {
+      _handler = null;
     });
   }
 }
