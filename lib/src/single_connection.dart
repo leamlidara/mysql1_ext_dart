@@ -67,7 +67,6 @@ class MySqlConnection {
 
     ReqRespConnection? conn;
     late Completer<void> handshakeCompleter;
-    late MySqlConnection _mysqlConn;
     _log.fine('opening connection to ${c.host}:${c.port}/${c.db}');
 
     final socket = await BufferedSocket.connect(

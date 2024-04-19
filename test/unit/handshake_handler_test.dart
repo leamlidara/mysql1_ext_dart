@@ -255,7 +255,7 @@ void main() {
       const serverCapabilities1 = CLIENT_PROTOCOL_41;
       const serverCapabilities2 = CLIENT_PLUGIN_AUTH >> 0x10;
       const scrambleBuffer1 = 'abcdefgh';
-      var scrambleBuffer2;
+      var scrambleBuffer2 = '';
       const scrambleLength = scrambleBuffer1.length;
       const pluginName = 'caching_sha2_password';
       final responseBuffer = _createHandshake(
